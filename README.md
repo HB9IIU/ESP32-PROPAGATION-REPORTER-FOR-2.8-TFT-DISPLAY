@@ -49,7 +49,7 @@ This project uses an **ESP32 with TFT display** to fetch and visualize real-time
 
 ### 🖼️ Screenshot
 
-*(Add a screenshot here if available)*
+![App Screenshot](./doc/ScreenShots/snapshot.png)
 
 ---
 
