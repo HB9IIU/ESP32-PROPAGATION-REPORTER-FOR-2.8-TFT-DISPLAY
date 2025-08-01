@@ -61,3 +61,7 @@ Desktop.ini
 # Custom: user-ignored local config or secret files
 secrets.h
 wifi_config.h
+
+
+
+/doc/snagit.snagx
