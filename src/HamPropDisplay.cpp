@@ -98,7 +98,6 @@ struct SolarData
 };
 
 SolarData solarData;
-
 void setup()
 {
   Serial.begin(115200);
@@ -107,21 +106,21 @@ void setup()
   tft.fillScreen(TFT_BLACK);
   tft.setTextSize(1);
   tft.setTextColor(TFT_WHITE);
+
   // Backlight pin setup
   pinMode(TFT_BLP, OUTPUT);
-  // Turn backlight ON permanently
-  digitalWrite(TFT_BLP, HIGH);
+  digitalWrite(TFT_BLP, HIGH); // Turn backlight ON permanently
+
   displaySplashScreen();
+
   // Connect to Wi-Fi
   if (!tryConnectSavedWiFi()) {
     startConfigurationPortal();
   }
 
-  
-  fetchSolarData();
-  fadeSplashToBlack();
   // Configure NTP (UTC only)
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
   // Wait for NTP sync
   tft.setFreeFont(&JetBrainsMono_Light7pt7b);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
@@ -133,18 +132,61 @@ void setup()
     Serial.print(".");
   }
   Serial.println("\n🕓 Time synced via NTP");
-  /*
-  tft.fillScreen(TFT_BLACK);
-  drawSolarSummaryPage1();
-  delay(2000);
-  drawSolarSummaryPage2();
-  delay(2000);
-  drawSolarSummaryPage3();
-  */
+
+  // ⏱️ Check if UTCoffset is already saved
+  prefs.begin("time", true);
+  bool hasSavedOffset = prefs.isKey("UTCoffset");
+  prefs.end();
+
+  if (hasSavedOffset) {
+    // ✅ Load previously saved offset
+    prefs.begin("time", true);
+    UTCoffset = prefs.getInt("UTCoffset", 2);
+    prefs.end();
+    Serial.printf("✅ Loaded saved UTCoffset: %d\n", UTCoffset);
+  }
+  else {
+    // 🕓 Attempt to calculate from phone time
+    prefs.begin("time", true);
+    String timeStr = prefs.getString("localTime", "");
+    prefs.end();
+
+    if (timeStr.length() >= 5) {
+      struct tm timeinfo;
+      if (getLocalTime(&timeinfo)) {
+        int userHour = timeStr.substring(0, 2).toInt();
+        int utcHour = timeinfo.tm_hour;
+        int offset = userHour - utcHour;
+
+        if (offset < -12) offset += 24;
+        if (offset > 12)  offset -= 24;
+
+        UTCoffset = offset;
+
+        prefs.begin("time", false);
+        prefs.putInt("UTCoffset", UTCoffset);
+        prefs.end();
+
+        Serial.printf("📱 Phone time: %s | 🌍 UTC: %02d:%02d\n", timeStr.c_str(), utcHour, timeinfo.tm_min);
+        Serial.printf("🧭 Calculated and saved UTCoffset = %d\n", UTCoffset);
+      } else {
+        Serial.println("❌ getLocalTime failed, using fallback UTCoffset = 2");
+        UTCoffset = 2;
+      }
+    } else {
+      Serial.println("⚠️ No phone time found, using default UTCoffset = 2");
+      UTCoffset = 2;
+    }
+  }
+
+  fetchSolarData();
+  fadeSplashToBlack();
+
   drawIntroPage(false); // set to true to force
   delay(500);
   drawSolarSummaryPage0();
 }
+
 void loop()
 {
   unsigned long nowMillis = millis();
@@ -938,25 +980,33 @@ scanCount = WiFi.scanNetworks();
     json += "]";
     request->send(200, "application/json", json);
   });
+server.on("/save", HTTP_POST, [](AsyncWebServerRequest *request) {
+  if (request->hasParam("ssid", true) &&
+      request->hasParam("password", true) &&
+      request->hasParam("time", true)) {
 
-  server.on("/save", HTTP_POST, [](AsyncWebServerRequest *request) {
-    if (request->hasParam("ssid", true) && request->hasParam("password", true)) {
-      String ssid = request->getParam("ssid", true)->value();
-      String pass = request->getParam("password", true)->value();
+    String ssid = request->getParam("ssid", true)->value();
+    String pass = request->getParam("password", true)->value();
+    String timeStr = request->getParam("time", true)->value();  // "14:35"
 
-      prefs.begin("wifi", false);
-      prefs.putString("ssid", ssid);
-      prefs.putString("pass", pass);
-      prefs.end();
+    prefs.begin("wifi", false);
+    prefs.putString("ssid", ssid);
+    prefs.putString("pass", pass);
+    prefs.end();
 
-      Serial.printf("✅ Saved WiFi: %s\n", ssid.c_str());
-      request->send(200, "text/html", "<h3>✅ WiFi credentials saved. Rebooting...</h3>");
-      delay(1000);
-      ESP.restart();
-    } else {
-      request->send(400, "text/plain", "Missing ssid or password");
-    }
-  });
+    prefs.begin("time", false);
+    prefs.putString("localTime", timeStr);  // Save user’s local time string
+    prefs.end();
+
+    Serial.printf("✅ Saved WiFi and phone time: %s\n", timeStr.c_str());
+
+    request->send(200, "text/html", "<h3>✅ WiFi and time saved. Rebooting...</h3>");
+    delay(1000);
+    ESP.restart();
+  } else {
+    request->send(400, "text/plain", "Missing fields.");
+  }
+});
 
   server.begin();
   Serial.println("🚀 Web server started.");
