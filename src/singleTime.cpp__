@@ -1,0 +1,128 @@
+#include <WiFi.h>
+#include <TFT_eSPI.h>
+#include <time.h>
+#include <HB97DIGITS12pt7b.h>  // Custom digit font with ':' included
+
+// Wi-Fi credentials
+const char* ssid = "MESH";
+const char* password = "Nestle2010Nestle";
+
+// TFT display
+TFT_eSPI tft = TFT_eSPI();
+
+// Previous time string
+String lastTimeStr = "        ";  // 8 characters: HH:MM:SS
+
+// Blinking colon state toggle
+bool colonVisible = true;
+
+// Time control
+unsigned long lastSecond = 0;
+
+// Relative x-offsets for HB97DIGITS12pt7b font layout
+const int xOffsets[8] = {
+  0,    // H1
+  15,   // H2
+  30,   // :
+  36,   // M1
+  51,   // M2
+  66,   // :
+  72,   // S1
+  87    // S2
+};
+
+// Draws the time at (x, y) with specified colors and blinking colon logic
+void drawTime(const String& timeStr, int x, int y, uint16_t digitColor, uint16_t backgroundColor, bool blinkColon) {
+  tft.setFreeFont(&HB97DIGITS12pt7b);
+
+  for (int i = 0; i < 8; i++) {
+    char newChar = timeStr.charAt(i);
+    char oldChar = lastTimeStr.charAt(i);
+    int xpos = x + xOffsets[i];
+
+    // Always redraw colon, toggling its color
+    if (i == 2 || i == 5) {
+      uint16_t colonColor = blinkColon ? (colonVisible ? digitColor : backgroundColor) : digitColor;
+      tft.setTextColor(colonColor, backgroundColor);
+      tft.drawString(":", xpos, y, 1);
+      continue;  // skip rest of loop for colon
+    }
+
+    // Redraw only if digit changed
+    if (newChar != oldChar) {
+      // Erase old character
+      tft.setTextColor(backgroundColor, backgroundColor);
+      tft.drawString(String(oldChar), xpos, y, 1);
+
+      // Draw new character
+      tft.setTextColor(digitColor, backgroundColor);
+      tft.drawString(String(newChar), xpos, y, 1);
+    }
+  }
+
+  // Save current drawn string (colons not modified)
+  lastTimeStr = timeStr;
+}
+
+
+void setup() {
+  Serial.begin(115200);
+
+  // Backlight pin setup (optional)
+  pinMode(TFT_BLP, OUTPUT);
+  digitalWrite(TFT_BLP, HIGH);  // Turn on backlight
+
+  // TFT init
+  tft.init();
+  tft.setRotation(3);  // Landscape
+  tft.fillScreen(TFT_BLACK);
+
+  tft.setFreeFont(&HB97DIGITS12pt7b);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setCursor(0, 0);
+  tft.println("Connecting to Wi-Fi...");
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    tft.print(".");
+  }
+
+  tft.fillScreen(TFT_BLACK);
+  tft.setCursor(0, 0);
+  tft.println("Wi-Fi connected");
+  tft.println(WiFi.localIP());
+
+  // Configure NTP (UTC)
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  tft.println("Waiting for time...");
+  while (time(nullptr) < 8 * 3600 * 2) {
+    delay(500);
+    tft.print(".");
+  }
+
+  tft.fillScreen(TFT_BLACK);
+}
+
+void loop() {
+  unsigned long nowMillis = millis();
+
+  if (nowMillis - lastSecond >= 1000) {
+    lastSecond = nowMillis;
+    colonVisible = !colonVisible;  // Toggle colon blink state
+
+    // Get UTC time
+    time_t now = time(nullptr);
+    struct tm* timeinfo = gmtime(&now);
+
+    // Format time string
+    char buf[9];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
+             timeinfo->tm_hour,
+             timeinfo->tm_min,
+             timeinfo->tm_sec);
+
+    // Draw time with blinking colons
+    drawTime(String(buf), 20, 140, TFT_WHITE, TFT_BLACK, false);
+  }
+}

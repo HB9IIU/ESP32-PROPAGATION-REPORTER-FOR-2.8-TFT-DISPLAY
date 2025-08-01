@@ -6,8 +6,8 @@
 #include "qrcode.h"
 #include <tinyxml2.h>
 #include <TFT_eSPI.h>
-#include <PNGdec.h>                   
-#include "fancySplash.h"              // Image is stored here in an 8-bit array  https://notisrac.github.io/FileToCArray/ (select treat as binary)
+#include <PNGdec.h>
+#include "fancySplash.h" // Image is stored here in an 8-bit array  https://notisrac.github.io/FileToCArray/ (select treat as binary)
 #include "html_page.h"
 #include <JetBrainsMono_Bold15pt7b.h> //  https://rop.nl/truetype2gfx/
 #include <JetBrainsMono_Bold11pt7b.h>
@@ -21,7 +21,7 @@
 //-------------------------------------------------------------------------------
 
 // UTC Offset
-int UTCoffset = 2;
+int UTCoffset = 2;  // will be updated when configuring with portal taking the time from the phone
 
 //-------------------------------------------------------------------------------
 
@@ -47,12 +47,36 @@ void drawSolarSummaryPage1();
 void drawSolarSummaryPage2();
 void drawSolarSummaryPage3();
 void drawIntroPage(bool forceDisplay);
+void drawLOCALTime(const String &timeStr, int x, int y, uint16_t digitColor, uint16_t backgroundColor, bool blinkColon);
+void drawUTCTime(const String &timeStr, int x, int y, uint16_t digitColor, uint16_t backgroundColor, bool blinkColon);
 
 // Time update interval
 unsigned long lastPrint = 0;
 
-char lastUtcStr[9] = "";
-char lastLocalStr[9] = "";
+// For elaborated time display (non flickering)
+// Previous time string
+int previousPage = -1;                // -1 means "no page shown yet"
+String LOCALlastTimeStr = "        "; // 8 characters: HH:MM:SS
+String UTClastTimeStr = "        ";   // 8 characters: HH:MM:SS
+uint16_t LOCALdigitColor = TFT_LIGHTGREY;
+uint16_t UTCdigitColor = TFT_LIGHTGREY;
+bool blinkingDot = false;
+// Time control
+unsigned long LOCALlastSecond = 0;
+unsigned long UTClastSecond = 0;
+// Relative x-offsets for HB97DIGITS12pt7b font layout
+const int xOffsets[8] = {
+    0,  // H1
+    15, // H2
+    30, // :
+    36, // M1
+    51, // M2
+    66, // :
+    72, // S1
+    87  // S2
+};
+// Blinking colon state toggle
+bool colonVisible = true;
 
 // TFT Display Setup
 TFT_eSPI tft = TFT_eSPI();
@@ -114,7 +138,8 @@ void setup()
   displaySplashScreen();
 
   // Connect to Wi-Fi
-  if (!tryConnectSavedWiFi()) {
+  if (!tryConnectSavedWiFi())
+  {
     startConfigurationPortal();
   }
 
@@ -124,7 +149,7 @@ void setup()
   // Wait for NTP sync
   tft.setFreeFont(&JetBrainsMono_Light7pt7b);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawCentreString("Waiting for NTP synch...", 160, 110, 1);
+  // tft.drawCentreString("Waiting for NTP synch...", 160, 110, 1);
   Serial.print("⏳ Waiting for NTP");
   while (time(nullptr) < 100000)
   {
@@ -138,28 +163,34 @@ void setup()
   bool hasSavedOffset = prefs.isKey("UTCoffset");
   prefs.end();
 
-  if (hasSavedOffset) {
+  if (hasSavedOffset)
+  {
     // ✅ Load previously saved offset
     prefs.begin("time", true);
     UTCoffset = prefs.getInt("UTCoffset", 2);
     prefs.end();
     Serial.printf("✅ Loaded saved UTCoffset: %d\n", UTCoffset);
   }
-  else {
+  else
+  {
     // 🕓 Attempt to calculate from phone time
     prefs.begin("time", true);
     String timeStr = prefs.getString("localTime", "");
     prefs.end();
 
-    if (timeStr.length() >= 5) {
+    if (timeStr.length() >= 5)
+    {
       struct tm timeinfo;
-      if (getLocalTime(&timeinfo)) {
+      if (getLocalTime(&timeinfo))
+      {
         int userHour = timeStr.substring(0, 2).toInt();
         int utcHour = timeinfo.tm_hour;
         int offset = userHour - utcHour;
 
-        if (offset < -12) offset += 24;
-        if (offset > 12)  offset -= 24;
+        if (offset < -12)
+          offset += 24;
+        if (offset > 12)
+          offset -= 24;
 
         UTCoffset = offset;
 
@@ -169,11 +200,15 @@ void setup()
 
         Serial.printf("📱 Phone time: %s | 🌍 UTC: %02d:%02d\n", timeStr.c_str(), utcHour, timeinfo.tm_min);
         Serial.printf("🧭 Calculated and saved UTCoffset = %d\n", UTCoffset);
-      } else {
+      }
+      else
+      {
         Serial.println("❌ getLocalTime failed, using fallback UTCoffset = 2");
         UTCoffset = 2;
       }
-    } else {
+    }
+    else
+    {
       Serial.println("⚠️ No phone time found, using default UTCoffset = 2");
       UTCoffset = 2;
     }
@@ -187,7 +222,8 @@ void setup()
   drawSolarSummaryPage0();
 }
 
-void loop()
+/*
+void loopOLD()
 {
   unsigned long nowMillis = millis();
 
@@ -213,25 +249,114 @@ void loop()
 
     if (currentPage == 0)
     {
-      // Erase old time
-      tft.setFreeFont(&HB97DIGITS12pt7b);
-      tft.setTextColor(TFT_BLACK);
-      tft.drawCentreString(lastLocalStr, 80, 205, 1);
-      tft.drawCentreString(lastUtcStr, 240, 205, 1);
 
-      // Draw new time
-      tft.setTextColor(TFT_WHITE);
-      tft.drawCentreString(localStr, 80, 205, 1);
-      tft.drawCentreString(utcStr, 240, 205, 1);
+      // Draw time with blinking colons
+      drawLOCALTime(String(localStr), 30, 205, LOCALdigitColor, TFT_BLACK, blinkingDot);
+      drawUTCTime(String(utcStr), 30 + 160, 205, UTCdigitColor, TFT_BLACK, blinkingDot);
     }
-
-    strncpy(lastLocalStr, localStr, sizeof(lastLocalStr));
-    strncpy(lastUtcStr, utcStr, sizeof(lastUtcStr));
   }
 
   // 🔁 Auto-refresh solar data every 15 minutes
   static unsigned long lastSolarFetch = 0;
   const unsigned long refreshInterval = 15 * 60 * 1000UL; // 15 min
+
+  if (nowMillis - lastSolarFetch > refreshInterval)
+  {
+    Serial.println("🔄 Refreshing solar data...");
+    fetchSolarData();
+
+    // Redraw current page
+    switch (currentPage)
+    {
+    case 0:
+      drawSolarSummaryPage0();
+      break;
+    case 1:
+      drawSolarSummaryPage1();
+      break;
+    case 2:
+      drawSolarSummaryPage2();
+      break;
+    case 3:
+      drawSolarSummaryPage3();
+      break;
+    }
+
+    lastSolarFetch = nowMillis;
+  }
+
+  // 👆 Touch detection to switch pages
+  uint16_t x, y;
+  if (tft.getTouch(&x, &y))
+  {
+    delay(200); // debounce
+    currentPage = (currentPage + 1) % 4;
+
+    switch (currentPage)
+    {
+    case 0:
+      drawSolarSummaryPage0();
+      break;
+    case 1:
+      drawSolarSummaryPage1();
+      break;
+    case 2:
+      drawSolarSummaryPage2();
+      break;
+    case 3:
+      drawSolarSummaryPage3();
+      break;
+    }
+  }
+}
+*/
+void loop()
+{
+  static int previousPage = -1; // For page switch detection
+  unsigned long nowMillis = millis();
+
+  // 🔄 Detect page change
+  if (currentPage != previousPage)
+  {
+    if (currentPage == 0)
+    {
+      UTClastTimeStr = "        ";
+      LOCALlastTimeStr = "        ";
+    }
+    previousPage = currentPage;
+  }
+
+  // ⏱ Time display every second
+  if (nowMillis - lastPrint >= 1000)
+  {
+    lastPrint = nowMillis;
+
+    time_t now = time(nullptr);
+    struct tm *utc_tm = gmtime(&now);
+
+    // --- Format UTC ---
+    char utcStr[9];
+    strftime(utcStr, sizeof(utcStr), "%H:%M:%S", utc_tm);
+
+    // --- Convert to local time manually ---
+    struct tm local_tm = *utc_tm;
+    local_tm.tm_hour += UTCoffset;
+    mktime(&local_tm);
+
+    char localStr[9];
+    strftime(localStr, sizeof(localStr), "%H:%M:%S", &local_tm);
+
+    if (currentPage == 0)
+    {
+      // Draw both times with blinking colons
+      drawLOCALTime(String(localStr), 30, 205, LOCALdigitColor, TFT_BLACK, blinkingDot);
+      drawUTCTime(String(utcStr), 30 + 160, 205, UTCdigitColor, TFT_BLACK, blinkingDot);
+    }
+  }
+
+  // 🔁 Auto-refresh solar data every 15 minutes
+  static unsigned long lastSolarFetch = 0;
+  const unsigned long refreshInterval = 15 * 60 * 1000UL;
 
   if (nowMillis - lastSolarFetch > refreshInterval)
   {
@@ -861,7 +986,7 @@ void drawSolarSummaryPage3()
 
 void drawIntroPage(bool forceDisplay)
 {
-  
+
   prefs.begin("solar", false);
 
   // Check user preference
@@ -924,63 +1049,69 @@ void drawIntroPage(bool forceDisplay)
   prefs.end();
 }
 
-void drawQRCode(const char *text, int x, int y, int scale) {
+void drawQRCode(const char *text, int x, int y, int scale)
+{
   QRCode qrcode;
   uint8_t qrcodeData[qrcode_getBufferSize(3)];
   qrcode_initText(&qrcode, qrcodeData, 3, ECC_LOW, text);
 
-  for (uint8_t row = 0; row < qrcode.size; row++) {
-    for (uint8_t col = 0; col < qrcode.size; col++) {
+  for (uint8_t row = 0; row < qrcode.size; row++)
+  {
+    for (uint8_t col = 0; col < qrcode.size; col++)
+    {
       int color = qrcode_getModule(&qrcode, col, row) ? TFT_BLACK : TFT_WHITE;
       tft.fillRect(x + col * scale, y + row * scale, scale, scale, color);
     }
   }
 }
-void drawQRcodeInstructions(){;
- // Draw QR instructions 
+void drawQRcodeInstructions()
+{
+  ;
+  // Draw QR instructions
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawCentreString("Time Wi-Fi Configuration", 160, 10, 4);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
   tft.drawCentreString("1", 80, 38, 4);
- tft.drawCentreString("2", 160+80, 38, 4);
+  tft.drawCentreString("2", 160 + 80, 38, 4);
   tft.setTextSize(1);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
 
   tft.drawCentreString("Scan to Join", 80, 85, 2);
-drawQRCode("WIFI:T:nopass;S:HB9IIUSetup;;", 80 - 116 / 2, 105, 4);
+  drawQRCode("WIFI:T:nopass;S:HB9IIUSetup;;", 80 - 116 / 2, 105, 4);
 
   tft.drawCentreString("Open config page", 240, 85, 2);
   drawQRCode("http://192.168.4.1", 240 - 116 / 2, 105, 4);
- }
-void startConfigurationPortal() {
+}
+void startConfigurationPortal()
+{
   Serial.println("🌐 Starting Captive Portal...");
-drawQRcodeInstructions();
+  drawQRcodeInstructions();
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP("HB9IIUSetup");
   IPAddress apIP(192, 168, 4, 1);
   WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
 
   Serial.println("📡 Scanning for networks...");
-scanCount = WiFi.scanNetworks();
+  scanCount = WiFi.scanNetworks();
   Serial.printf("📶 Found %d networks\n", scanCount);
 
   // Routes
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send_P(200, "text/html", index_html);
-  });
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send_P(200, "text/html", index_html); });
 
-  server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
     String json = "[";
     for (int i = 0; i < scanCount; i++) {
       if (i > 0) json += ",";
       json += "\"" + WiFi.SSID(i) + "\"";
     }
     json += "]";
-    request->send(200, "application/json", json);
-  });
-server.on("/save", HTTP_POST, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", json); });
+  server.on("/save", HTTP_POST, [](AsyncWebServerRequest *request)
+            {
   if (request->hasParam("ssid", true) &&
       request->hasParam("password", true) &&
       request->hasParam("time", true)) {
@@ -1005,19 +1136,20 @@ server.on("/save", HTTP_POST, [](AsyncWebServerRequest *request) {
     ESP.restart();
   } else {
     request->send(400, "text/plain", "Missing fields.");
-  }
-});
+  } });
 
   server.begin();
   Serial.println("🚀 Web server started.");
   // 🔁 Wait here until Wi-Fi is connected
-while (WiFi.status() != WL_CONNECTED) {
-  delay(500);
-}
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+  }
 
-esp_restart();
+  esp_restart();
 }
-bool tryConnectSavedWiFi() {
+bool tryConnectSavedWiFi()
+{
   Serial.println("🔍 Attempting to load saved WiFi credentials...");
 
   prefs.begin("wifi", true);
@@ -1025,19 +1157,22 @@ bool tryConnectSavedWiFi() {
   String pass = prefs.getString("pass", "");
   prefs.end();
 
-  if (ssid.isEmpty() || pass.isEmpty()) {
+  if (ssid.isEmpty() || pass.isEmpty())
+  {
     Serial.println("⚠️ No saved credentials found.");
     return false;
   }
 
   Serial.printf("📡 Found SSID: %s\n", ssid.c_str());
-  Serial.printf("🔐 Found Password: %s\n", pass.c_str()); 
+  Serial.printf("🔐 Found Password: %s\n", pass.c_str());
 
   Serial.printf("🔌 Connecting to WiFi: %s...\n", ssid.c_str());
   WiFi.begin(ssid.c_str(), pass.c_str());
 
-  for (int i = 0; i < 20; i++) {
-    if (WiFi.status() == WL_CONNECTED) {
+  for (int i = 0; i < 20; i++)
+  {
+    if (WiFi.status() == WL_CONNECTED)
+    {
       Serial.println("✅ Connected to WiFi!");
       Serial.print("📶 IP Address: ");
       Serial.println(WiFi.localIP());
@@ -1050,3 +1185,75 @@ bool tryConnectSavedWiFi() {
   startConfigurationPortal();
 }
 
+// Draws the time at (x, y) with specified colors and blinking colon logic
+void drawLOCALTime(const String &timeStr, int x, int y, uint16_t digitColor, uint16_t backgroundColor, bool blinkColon)
+{
+  tft.setFreeFont(&HB97DIGITS12pt7b);
+
+  for (int i = 0; i < 8; i++)
+  {
+    char newChar = timeStr.charAt(i);
+    char oldChar = LOCALlastTimeStr.charAt(i);
+    int xpos = x + xOffsets[i];
+
+    // Always redraw colon, toggling its color
+    if (i == 2 || i == 5)
+    {
+      uint16_t colonColor = blinkColon ? (colonVisible ? digitColor : backgroundColor) : digitColor;
+      tft.setTextColor(colonColor, backgroundColor);
+      tft.drawString(":", xpos, y, 1);
+      continue; // skip rest of loop for colon
+    }
+
+    // Redraw only if digit changed
+    if (newChar != oldChar)
+    {
+      // Erase old character
+      tft.setTextColor(backgroundColor, backgroundColor);
+      tft.drawString(String(oldChar), xpos, y, 1);
+
+      // Draw new character
+      tft.setTextColor(digitColor, backgroundColor);
+      tft.drawString(String(newChar), xpos, y, 1);
+    }
+  }
+
+  // Save current drawn string (colons not modified)
+  LOCALlastTimeStr = timeStr;
+}
+
+void drawUTCTime(const String &timeStr, int x, int y, uint16_t digitColor, uint16_t backgroundColor, bool blinkColon)
+{
+  tft.setFreeFont(&HB97DIGITS12pt7b);
+
+  for (int i = 0; i < 8; i++)
+  {
+    char newChar = timeStr.charAt(i);
+    char oldChar = UTClastTimeStr.charAt(i);
+    int xpos = x + xOffsets[i];
+
+    // Always redraw colon, toggling its color
+    if (i == 2 || i == 5)
+    {
+      uint16_t colonColor = blinkColon ? (colonVisible ? digitColor : backgroundColor) : digitColor;
+      tft.setTextColor(colonColor, backgroundColor);
+      tft.drawString(":", xpos, y, 1);
+      continue; // skip rest of loop for colon
+    }
+
+    // Redraw only if digit changed
+    if (newChar != oldChar)
+    {
+      // Erase old character
+      tft.setTextColor(backgroundColor, backgroundColor);
+      tft.drawString(String(oldChar), xpos, y, 1);
+
+      // Draw new character
+      tft.setTextColor(digitColor, backgroundColor);
+      tft.drawString(String(newChar), xpos, y, 1);
+    }
+  }
+
+  // Save current drawn string (colons not modified)
+  UTClastTimeStr = timeStr;
+}
