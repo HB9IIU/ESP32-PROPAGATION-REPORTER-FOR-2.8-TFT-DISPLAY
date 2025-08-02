@@ -61,9 +61,7 @@ String UTClastTimeStr = "        ";   // 8 characters: HH:MM:SS
 uint16_t LOCALdigitColor = TFT_LIGHTGREY;
 uint16_t UTCdigitColor = TFT_LIGHTGREY;
 bool blinkingDot = false;
-// Time control
-unsigned long LOCALlastSecond = 0;
-unsigned long UTClastSecond = 0;
+
 // Relative x-offsets for HB97DIGITS12pt7b font layout
 const int xOffsets[8] = {
     0,  // H1
@@ -222,94 +220,6 @@ void setup()
   drawSolarSummaryPage0();
 }
 
-/*
-void loopOLD()
-{
-  unsigned long nowMillis = millis();
-
-  // ⏱ Time display every second
-  if (nowMillis - lastPrint >= 1000)
-  {
-    lastPrint = nowMillis;
-
-    time_t now = time(nullptr);
-    struct tm *utc_tm = gmtime(&now);
-
-    // --- Format UTC ---
-    char utcStr[9];
-    strftime(utcStr, sizeof(utcStr), "%H:%M:%S", utc_tm);
-
-    // --- Convert to local time manually ---
-    struct tm local_tm = *utc_tm;
-    local_tm.tm_hour += UTCoffset;
-    mktime(&local_tm);
-
-    char localStr[9];
-    strftime(localStr, sizeof(localStr), "%H:%M:%S", &local_tm);
-
-    if (currentPage == 0)
-    {
-
-      // Draw time with blinking colons
-      drawLOCALTime(String(localStr), 30, 205, LOCALdigitColor, TFT_BLACK, blinkingDot);
-      drawUTCTime(String(utcStr), 30 + 160, 205, UTCdigitColor, TFT_BLACK, blinkingDot);
-    }
-  }
-
-  // 🔁 Auto-refresh solar data every 15 minutes
-  static unsigned long lastSolarFetch = 0;
-  const unsigned long refreshInterval = 15 * 60 * 1000UL; // 15 min
-
-  if (nowMillis - lastSolarFetch > refreshInterval)
-  {
-    Serial.println("🔄 Refreshing solar data...");
-    fetchSolarData();
-
-    // Redraw current page
-    switch (currentPage)
-    {
-    case 0:
-      drawSolarSummaryPage0();
-      break;
-    case 1:
-      drawSolarSummaryPage1();
-      break;
-    case 2:
-      drawSolarSummaryPage2();
-      break;
-    case 3:
-      drawSolarSummaryPage3();
-      break;
-    }
-
-    lastSolarFetch = nowMillis;
-  }
-
-  // 👆 Touch detection to switch pages
-  uint16_t x, y;
-  if (tft.getTouch(&x, &y))
-  {
-    delay(200); // debounce
-    currentPage = (currentPage + 1) % 4;
-
-    switch (currentPage)
-    {
-    case 0:
-      drawSolarSummaryPage0();
-      break;
-    case 1:
-      drawSolarSummaryPage1();
-      break;
-    case 2:
-      drawSolarSummaryPage2();
-      break;
-    case 3:
-      drawSolarSummaryPage3();
-      break;
-    }
-  }
-}
-*/
 void loop()
 {
   static int previousPage = -1; // For page switch detection
@@ -367,6 +277,8 @@ void loop()
     switch (currentPage)
     {
     case 0:
+         UTClastTimeStr = "        ";
+      LOCALlastTimeStr = "        ";
       drawSolarSummaryPage0();
       break;
     case 1:
@@ -379,7 +291,6 @@ void loop()
       drawSolarSummaryPage3();
       break;
     }
-
     lastSolarFetch = nowMillis;
   }
 
