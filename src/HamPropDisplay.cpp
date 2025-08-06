@@ -46,6 +46,8 @@ String formatUpdatedTimestampToUTC(const String &raw);
 void drawSolarSummaryPage1();
 void drawSolarSummaryPage2();
 void drawSolarSummaryPage3();
+void drawSolarSummaryPage4();
+void drawWiFiSignalMeter(int qualityPercent);
 void drawIntroPage(bool forceDisplay);
 void drawLOCALTime(const String &timeStr, int x, int y, uint16_t digitColor, uint16_t backgroundColor, bool blinkColon);
 void drawUTCTime(const String &timeStr, int x, int y, uint16_t digitColor, uint16_t backgroundColor, bool blinkColon);
@@ -290,6 +292,9 @@ void loop()
     case 3:
       drawSolarSummaryPage3();
       break;
+     case 4:
+    drawSolarSummaryPage4();
+    break;  
     }
     lastSolarFetch = nowMillis;
   }
@@ -299,7 +304,7 @@ void loop()
   if (tft.getTouch(&x, &y))
   {
     delay(200); // debounce
-    currentPage = (currentPage + 1) % 4;
+    currentPage = (currentPage + 1) % 5;
 
     switch (currentPage)
     {
@@ -315,6 +320,10 @@ void loop()
     case 3:
       drawSolarSummaryPage3();
       break;
+     case 4:
+    drawSolarSummaryPage4();
+    break;  
+
     }
   }
 }
@@ -1167,4 +1176,77 @@ void drawUTCTime(const String &timeStr, int x, int y, uint16_t digitColor, uint1
 
   // Save current drawn string (colons not modified)
   UTClastTimeStr = timeStr;
+}
+void drawSolarSummaryPage4()
+{
+  tft.fillScreen(TFT_BLACK);
+  tft.setFreeFont(&UbuntuMono_Regular8pt7b);
+  tft.setTextSize(1);
+
+  int y = 15;
+  const int lineSpacing = 18;
+
+  auto printLine = [&](const String &label, const String &value, uint16_t color = TFT_WHITE)
+  {
+    tft.setTextColor(color, TFT_BLACK);
+    tft.setCursor(10, y);
+    tft.print(label);
+    tft.setCursor(130, y);
+    tft.print(": ");
+    tft.print(value);
+    y += lineSpacing;
+  };
+
+  String ssid = WiFi.SSID();
+  String ip = WiFi.localIP().toString();
+  String mac = WiFi.macAddress();
+  int rssi = WiFi.RSSI();
+  int quality = constrain(2 * (rssi + 100), 0, 100);
+  String gateway = WiFi.gatewayIP().toString();
+  String subnet = WiFi.subnetMask().toString();
+  String dns = WiFi.dnsIP().toString();
+  String hostname = WiFi.getHostname();
+
+  printLine("SSID", ssid);
+  printLine("IP", ip);
+  printLine("MAC", mac);
+  printLine("RSSI", String(rssi) + " dBm");
+  printLine("Signal", String(quality) + "%");
+  printLine("Gateway", gateway);
+  printLine("Subnet", subnet);
+  printLine("DNS", dns);
+  printLine("Hostname", hostname);
+  drawWiFiSignalMeter(quality);
+}
+void drawWiFiSignalMeter(int qualityPercent)
+{
+  const int meterX = 20;
+  const int meterY = 200;
+  const int barWidth = 20;
+  const int barSpacing = 5;
+  const int barHeight = 15;
+  const int numBars = 10;
+
+  // Map quality (0–100%) to number of bars (0–10)
+  int activeBars = map(qualityPercent, 0, 100, 0, numBars);
+
+  for (int i = 0; i < numBars; i++)
+  {
+    int x = meterX + i * (barWidth + barSpacing);
+    uint16_t color = TFT_DARKGREY;
+
+    if (i < activeBars)
+    {
+      if (qualityPercent <= 30)
+        color = TFT_RED;
+      else if (qualityPercent <= 70)
+        color = TFT_YELLOW;
+      else
+        color = TFT_GREEN;
+    }
+
+    tft.fillRect(x, meterY, barWidth, barHeight, color);
+  }
+  // draw a border around the full meter
+  tft.drawRect(meterX - 2, meterY - 2, numBars * (barWidth + barSpacing) - barSpacing + 4, barHeight + 4, TFT_LIGHTGREY);
 }
