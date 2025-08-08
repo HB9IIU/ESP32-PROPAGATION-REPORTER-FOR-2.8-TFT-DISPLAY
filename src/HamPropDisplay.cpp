@@ -1229,32 +1229,54 @@ void drawWiFiSignalMeter(int qualityPercent)
   // draw a border around the full meter
   tft.drawRect(meterX - 2, meterY - 2, numBars * (barWidth + barSpacing) - barSpacing + 4, barHeight + 4, TFT_LIGHTGREY);
 }
-
 void updateWiFiSignalDisplay()
 {
   int rssi = WiFi.RSSI();
   int quality = constrain(2 * (rssi + 100), 0, 100);
 
-  // Clear previous RSSI and quality text
-  tft.fillRect(130, 15 + 3 * 18, 180, 18, TFT_BLACK); // RSSI line
-  tft.fillRect(130, 15 + 4 * 18, 180, 18, TFT_BLACK); // Signal line
+  // Static variables to track previous values
+  static String lastRSSI = "";
+  static String lastSignal = "";
 
-  // Redraw RSSI and Signal %
+  // Convert new values to strings
+  String newRSSI = String(rssi) + " dBm";
+  String newSignal = String(quality) + "%";
+
+  // Coordinates based on drawSolarSummaryPage4
+  int rssiX = 130;
+  int rssiY = 15 + 3 * 18;
+  int signalX = 130;
+  int signalY = 15 + 4 * 18;
+
+  tft.setTextColor(TFT_BLACK, TFT_BLACK); // erase with background color
+
+  // Erase previous RSSI
+  tft.setCursor(rssiX, rssiY);
+  tft.print(": ");
+  tft.print(lastRSSI);
+
+  // Erase previous Signal %
+  tft.setCursor(signalX, signalY);
+  tft.print(": ");
+  tft.print(lastSignal);
+
+  // Draw updated values
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setCursor(10, 15 + 3 * 18);
-  tft.print("RSSI");
-  tft.setCursor(130, 15 + 3 * 18);
-  tft.print(": ");
-  tft.print(rssi);
-  tft.print(" dBm");
 
-  tft.setCursor(10, 15 + 4 * 18);
-  tft.print("Signal");
-  tft.setCursor(130, 15 + 4 * 18);
+  tft.setCursor(rssiX, rssiY);
   tft.print(": ");
-  tft.print(quality);
-  tft.print("%");
+  tft.print(newRSSI);
+
+  tft.setCursor(signalX, signalY);
+  tft.print(": ");
+  tft.print(newSignal);
 
   // Update bar graph
   drawWiFiSignalMeter(quality);
+
+  // Save current values for next comparison
+  lastRSSI = newRSSI;
+  lastSignal = newSignal;
 }
+
+
