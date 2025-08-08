@@ -51,7 +51,7 @@ void drawWiFiSignalMeter(int qualityPercent);
 void drawIntroPage(bool forceDisplay);
 void drawLOCALTime(const String &timeStr, int x, int y, uint16_t digitColor, uint16_t backgroundColor, bool blinkColon);
 void drawUTCTime(const String &timeStr, int x, int y, uint16_t digitColor, uint16_t backgroundColor, bool blinkColon);
-
+void updateWiFiSignalDisplay();
 // Time update interval
 unsigned long lastPrint = 0;
 
@@ -221,13 +221,12 @@ void setup()
   delay(500);
   drawSolarSummaryPage0();
 }
-
 void loop()
 {
-  static int previousPage = -1; // For page switch detection
+  static int previousPage = -1;
   unsigned long nowMillis = millis();
 
-  // 🔄 Detect page change
+  // Page switch detection
   if (currentPage != previousPage)
   {
     if (currentPage == 0)
@@ -238,7 +237,7 @@ void loop()
     previousPage = currentPage;
   }
 
-  // ⏱ Time display every second
+  // Time update every second
   if (nowMillis - lastPrint >= 1000)
   {
     lastPrint = nowMillis;
@@ -246,11 +245,9 @@ void loop()
     time_t now = time(nullptr);
     struct tm *utc_tm = gmtime(&now);
 
-    // --- Format UTC ---
     char utcStr[9];
     strftime(utcStr, sizeof(utcStr), "%H:%M:%S", utc_tm);
 
-    // --- Convert to local time manually ---
     struct tm local_tm = *utc_tm;
     local_tm.tm_hour += UTCoffset;
     mktime(&local_tm);
@@ -260,13 +257,18 @@ void loop()
 
     if (currentPage == 0)
     {
-      // Draw both times with blinking colons
       drawLOCALTime(String(localStr), 30, 205, LOCALdigitColor, TFT_BLACK, blinkingDot);
       drawUTCTime(String(utcStr), 30 + 160, 205, UTCdigitColor, TFT_BLACK, blinkingDot);
     }
+
+    // 💡 Update live Wi-Fi signal when on page 4
+    if (currentPage == 4)
+    {
+      updateWiFiSignalDisplay();
+    }
   }
 
-  // 🔁 Auto-refresh solar data every 15 minutes
+  // Solar data refresh
   static unsigned long lastSolarFetch = 0;
   const unsigned long refreshInterval = 15 * 60 * 1000UL;
 
@@ -275,58 +277,35 @@ void loop()
     Serial.println("🔄 Refreshing solar data...");
     fetchSolarData();
 
-    // Redraw current page
     switch (currentPage)
     {
-    case 0:
-         UTClastTimeStr = "        ";
-      LOCALlastTimeStr = "        ";
-      drawSolarSummaryPage0();
-      break;
-    case 1:
-      drawSolarSummaryPage1();
-      break;
-    case 2:
-      drawSolarSummaryPage2();
-      break;
-    case 3:
-      drawSolarSummaryPage3();
-      break;
-     case 4:
-    drawSolarSummaryPage4();
-    break;  
+    case 0: UTClastTimeStr = "        "; LOCALlastTimeStr = "        "; drawSolarSummaryPage0(); break;
+    case 1: drawSolarSummaryPage1(); break;
+    case 2: drawSolarSummaryPage2(); break;
+    case 3: drawSolarSummaryPage3(); break;
+    case 4: drawSolarSummaryPage4(); break;
     }
     lastSolarFetch = nowMillis;
   }
 
-  // 👆 Touch detection to switch pages
+  // Touch page switch
   uint16_t x, y;
   if (tft.getTouch(&x, &y))
   {
-    delay(200); // debounce
+    delay(200);
     currentPage = (currentPage + 1) % 5;
 
     switch (currentPage)
     {
-    case 0:
-      drawSolarSummaryPage0();
-      break;
-    case 1:
-      drawSolarSummaryPage1();
-      break;
-    case 2:
-      drawSolarSummaryPage2();
-      break;
-    case 3:
-      drawSolarSummaryPage3();
-      break;
-     case 4:
-    drawSolarSummaryPage4();
-    break;  
-
+    case 0: drawSolarSummaryPage0(); break;
+    case 1: drawSolarSummaryPage1(); break;
+    case 2: drawSolarSummaryPage2(); break;
+    case 3: drawSolarSummaryPage3(); break;
+    case 4: drawSolarSummaryPage4(); break;
     }
   }
 }
+
 
 void displaySplashScreen()
 {
@@ -1249,4 +1228,33 @@ void drawWiFiSignalMeter(int qualityPercent)
   }
   // draw a border around the full meter
   tft.drawRect(meterX - 2, meterY - 2, numBars * (barWidth + barSpacing) - barSpacing + 4, barHeight + 4, TFT_LIGHTGREY);
+}
+
+void updateWiFiSignalDisplay()
+{
+  int rssi = WiFi.RSSI();
+  int quality = constrain(2 * (rssi + 100), 0, 100);
+
+  // Clear previous RSSI and quality text
+  tft.fillRect(130, 15 + 3 * 18, 180, 18, TFT_BLACK); // RSSI line
+  tft.fillRect(130, 15 + 4 * 18, 180, 18, TFT_BLACK); // Signal line
+
+  // Redraw RSSI and Signal %
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setCursor(10, 15 + 3 * 18);
+  tft.print("RSSI");
+  tft.setCursor(130, 15 + 3 * 18);
+  tft.print(": ");
+  tft.print(rssi);
+  tft.print(" dBm");
+
+  tft.setCursor(10, 15 + 4 * 18);
+  tft.print("Signal");
+  tft.setCursor(130, 15 + 4 * 18);
+  tft.print(": ");
+  tft.print(quality);
+  tft.print("%");
+
+  // Update bar graph
+  drawWiFiSignalMeter(quality);
 }
