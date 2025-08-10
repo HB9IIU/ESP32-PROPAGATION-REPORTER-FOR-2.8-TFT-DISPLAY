@@ -32,6 +32,10 @@ AsyncWebServer server(80);
 Preferences prefs;
 PNG png; // PNG decoder instance
 
+static const uint8_t  MAX_WIFI_REBOOTS   = 3;     
+static const uint32_t CONNECT_TIMEOUT_MS = 10000; 
+
+
 // Prototypes
 void drawQRCode(const char *text, int x, int y, int scale);
 void drawQRcodeInstructions();
@@ -1051,37 +1055,74 @@ bool tryConnectSavedWiFi()
 {
   Serial.println("🔍 Attempting to load saved WiFi credentials...");
 
-  prefs.begin("wifi", true);
+  Preferences prefs;
+  prefs.begin("wifi", /*readOnly=*/false);
   String ssid = prefs.getString("ssid", "");
   String pass = prefs.getString("pass", "");
+  uint8_t failCount = prefs.getUChar("wifi_fail", 0);
   prefs.end();
 
+  // No credentials: go straight to portal (don’t waste reboots)
   if (ssid.isEmpty() || pass.isEmpty())
   {
-    Serial.println("⚠️ No saved credentials found.");
+    Serial.println("⚠️ No saved credentials found. Starting configuration portal.");
+    startConfigurationPortal();
     return false;
   }
 
   Serial.printf("📡 Found SSID: %s\n", ssid.c_str());
-  Serial.printf("🔐 Found Password: %s\n", pass.c_str());
+  // Serial.printf("🔐 Found Password: %s\n", pass.c_str()); // avoid printing secrets
 
   Serial.printf("🔌 Connecting to WiFi: %s...\n", ssid.c_str());
+  WiFi.mode(WIFI_STA);
   WiFi.begin(ssid.c_str(), pass.c_str());
 
-  for (int i = 0; i < 20; i++)
-  {
-    if (WiFi.status() == WL_CONNECTED)
-    {
-      Serial.println("✅ Connected to WiFi!");
-      Serial.print("📶 IP Address: ");
-      Serial.println(WiFi.localIP());
-      return true;
-    }
+  unsigned long deadline = millis() + CONNECT_TIMEOUT_MS;
+  while (WiFi.status() != WL_CONNECTED && millis() < deadline) {
+    delay(200);
     Serial.print(".");
-    delay(500);
   }
-  Serial.println("\n❌ Failed to connect to saved WiFi.");
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    Serial.println("✅ Connected to WiFi!");
+    Serial.print("📶 IP Address: ");
+    Serial.println(WiFi.localIP());
+
+    // Reset fail counter on success
+    prefs.begin("wifi", /*readOnly=*/false);
+    prefs.putUChar("wifi_fail", 0);
+    prefs.end();
+    return true;
+  }
+
+  // Not connected -> handle reboot logic
+  Serial.println("❌ Failed to connect to saved WiFi.");
+
+  if (failCount < MAX_WIFI_REBOOTS)
+  {
+    failCount++;
+    Serial.printf("🔁 Reboot attempt %u/%u before starting portal...\n", failCount, MAX_WIFI_REBOOTS);
+
+    // Persist the incremented counter
+    prefs.begin("wifi", /*readOnly=*/false);
+    prefs.putUChar("wifi_fail", failCount);
+    prefs.end();
+
+    delay(300); // let serial flush
+    ESP.restart(); // Will not return
+    while (true) { delay(1000); } // safety
+  }
+
+  // Reached the limit: reset counter and open portal
+  Serial.println("🛠  Max reboot attempts reached. Starting configuration portal.");
+  prefs.begin("wifi", /*readOnly=*/false);
+  prefs.putUChar("wifi_fail", 0);
+  prefs.end();
+
   startConfigurationPortal();
+  return false;
 }
 
 // Draws the time at (x, y) with specified colors and blinking colon logic
