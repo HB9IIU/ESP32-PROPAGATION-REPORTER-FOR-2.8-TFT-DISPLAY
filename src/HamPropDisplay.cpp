@@ -1062,7 +1062,6 @@ bool tryConnectSavedWiFi()
   uint8_t failCount = prefs.getUChar("wifi_fail", 0);
   prefs.end();
 
-  // No credentials: go straight to portal (don’t waste reboots)
   if (ssid.isEmpty() || pass.isEmpty())
   {
     Serial.println("⚠️ No saved credentials found. Starting configuration portal.");
@@ -1073,11 +1072,11 @@ bool tryConnectSavedWiFi()
   Serial.printf("📡 Found SSID: %s\n", ssid.c_str());
   // Serial.printf("🔐 Found Password: %s\n", pass.c_str()); // avoid printing secrets
 
-  Serial.printf("🔌 Connecting to WiFi: %s...\n", ssid.c_str());
   WiFi.mode(WIFI_STA);
+  Serial.printf("🔌 Connecting to WiFi: %s...\n", ssid.c_str());
   WiFi.begin(ssid.c_str(), pass.c_str());
 
-  unsigned long deadline = millis() + CONNECT_TIMEOUT_MS;
+  const unsigned long deadline = millis() + CONNECT_TIMEOUT_MS;
   while (WiFi.status() != WL_CONNECTED && millis() < deadline) {
     delay(200);
     Serial.print(".");
@@ -1090,7 +1089,20 @@ bool tryConnectSavedWiFi()
     Serial.print("📶 IP Address: ");
     Serial.println(WiFi.localIP());
 
-    // Reset fail counter on success
+    // --- Override DNS servers (switch to static config using current IP/gw/subnet) ---
+    // Primary: 1.1.1.1 (Cloudflare), Secondary: 1.0.0.1
+    IPAddress dns1(1, 1, 1, 1);
+    IPAddress dns2(1, 0, 0, 1);
+
+    bool dnsOk = WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(), dns1, dns2);
+    if (dnsOk) {
+      Serial.printf("🌐 DNS set to %s (primary), %s (secondary)\n",
+                    dns1.toString().c_str(), dns2.toString().c_str());
+    } else {
+      Serial.println("⚠️ Failed to set custom DNS servers.");
+    }
+
+    // Reset the persistent fail counter on success
     prefs.begin("wifi", /*readOnly=*/false);
     prefs.putUChar("wifi_fail", 0);
     prefs.end();
@@ -1110,8 +1122,8 @@ bool tryConnectSavedWiFi()
     prefs.putUChar("wifi_fail", failCount);
     prefs.end();
 
-    delay(300); // let serial flush
-    ESP.restart(); // Will not return
+    delay(300);          // let serial flush
+    ESP.restart();       // will not return
     while (true) { delay(1000); } // safety
   }
 
@@ -1124,7 +1136,6 @@ bool tryConnectSavedWiFi()
   startConfigurationPortal();
   return false;
 }
-
 // Draws the time at (x, y) with specified colors and blinking colon logic
 void drawLOCALTime(const String &timeStr, int x, int y, uint16_t digitColor, uint16_t backgroundColor, bool blinkColon)
 {
