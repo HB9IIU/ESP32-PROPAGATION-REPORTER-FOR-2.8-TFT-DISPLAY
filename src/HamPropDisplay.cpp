@@ -134,14 +134,7 @@ void setup()
   // Backlight pin setup
   pinMode(TFT_BLP, OUTPUT);
   digitalWrite(TFT_BLP, HIGH); // Turn backlight ON permanently
- // Draw a vertical line at x = 1, from y=0 to y=height-1
-  tft.drawFastVLine(1, 0, tft.height(), TFT_WHITE);
-tft.drawFastVLine(tft.width() - 1, 0, tft.height(), TFT_WHITE);
- tft.drawFastHLine(0, 0, tft.width(), TFT_WHITE);                 // Top line
-tft.drawFastHLine(0, tft.height() - 1, tft.width(), TFT_WHITE);  // Bottom line
 
-
-delay(100000);
   displaySplashScreen();
 
   // Connect to Wi-Fi
