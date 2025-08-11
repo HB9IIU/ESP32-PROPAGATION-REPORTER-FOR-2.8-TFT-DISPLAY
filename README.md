@@ -4,7 +4,7 @@
 
 ---
 
-## 🌐 ESP32 Solar Band Monitor
+## 🌐 ESP32 HF Propagation Monitor Based on Solar Data
 
 This project uses an **ESP32 with TFT display** to fetch and visualize real-time **solar and HF propagation data** from [hamqsl.com](https://www.hamqsl.com/solarxml.php). It displays band conditions, geomagnetic data, and VHF propagation metrics on a touchscreen interface, with a built-in configuration portal for Wi-Fi setup.
 
