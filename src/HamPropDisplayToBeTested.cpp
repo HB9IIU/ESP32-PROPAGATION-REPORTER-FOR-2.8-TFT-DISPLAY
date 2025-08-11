@@ -128,6 +128,7 @@ SolarData solarData;
 void setup()
 {
   Serial.begin(115200);
+  delay(4000);
   tft.init();
   tft.setRotation(3);
   tft.fillScreen(TFT_BLACK);
@@ -137,9 +138,15 @@ void setup()
   // Backlight pin setup
   pinMode(TFT_BLP, OUTPUT);
   digitalWrite(TFT_BLP, HIGH); // Turn backlight ON permanently
-
+ uint16_t x, y;
+  if (tft.getTouch(&x, &y))
+  {
+    Serial.println("TOUCHED SCREEN");
+    while (true)
+      ;
+  }
   displaySplashScreen();
-
+ 
   // Connect to Wi-Fi
   if (!tryConnectSavedWiFi())
   {
