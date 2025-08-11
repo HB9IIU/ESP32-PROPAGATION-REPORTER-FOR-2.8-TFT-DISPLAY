@@ -7,7 +7,9 @@
 #include <tinyxml2.h>
 #include <TFT_eSPI.h>
 #include <PNGdec.h>
-#include "fancySplash.h" // Image is stored here in an 8-bit array  https://notisrac.github.io/FileToCArray/ (select treat as binary)
+#include "fancySplash.h"  // Image is stored here in an 8-bit array  https://notisrac.github.io/FileToCArray/ (select treat as binary)
+#include "factoryReset.h" // Image is stored here in an 8-bit array  https://notisrac.github.io/FileToCArray/ (select treat as binary)
+
 #include "html_page.h"
 #include <JetBrainsMono_Bold15pt7b.h> //  https://rop.nl/truetype2gfx/
 #include <JetBrainsMono_Bold11pt7b.h>
@@ -55,6 +57,8 @@ void drawIntroPage(bool forceDisplay);
 void drawLOCALTime(const String &timeStr, int x, int y, uint16_t digitColor, uint16_t backgroundColor, bool blinkColon);
 void drawUTCTime(const String &timeStr, int x, int y, uint16_t digitColor, uint16_t backgroundColor, bool blinkColon);
 void updateWiFiSignalDisplay();
+void displayFactoryResetScreen();
+void wipeAllPreferences();
 // Time update interval
 unsigned long lastPrint = 0;
 
@@ -128,7 +132,7 @@ SolarData solarData;
 void setup()
 {
   Serial.begin(115200);
-  delay(4000);
+  // delay(4000);
   tft.init();
   tft.setRotation(3);
   tft.fillScreen(TFT_BLACK);
@@ -138,15 +142,61 @@ void setup()
   // Backlight pin setup
   pinMode(TFT_BLP, OUTPUT);
   digitalWrite(TFT_BLP, HIGH); // Turn backlight ON permanently
- uint16_t x, y;
+
+  uint16_t x, y;
   if (tft.getTouch(&x, &y))
   {
-    Serial.println("TOUCHED SCREEN");
-    while (true)
-      ;
+    displayFactoryResetScreen();
+
+    while (tft.getTouch(&x, &y))
+    {
+      delay(1000); // wait for finger is reelased
+    }
+    delay(1000);
+    // Hardcoded rectangles
+    const uint16_t R1_X = 0, R1_Y = 95, R1_W = 320, R1_H = 50;  // top
+    const uint16_t R2_X = 0, R2_Y = 180, R2_W = 320, R2_H = 60; // bottom
+
+    // Draw them (remove if you already drew elsewhere)
+    // tft.drawRect(R1_X, R1_Y, R1_W, R1_H, TFT_WHITE);
+    // tft.drawRect(R2_X, R2_Y, R2_W, R2_H, TFT_WHITE);
+
+    for (;;)
+    {
+      uint16_t x, y;
+      if (tft.getTouch(&x, &y))
+      {
+
+        // Invert Y
+        y = 240 - y;
+
+        if (y < 160)
+        { // upper half (after inversion)
+          Serial.println("UPPER");
+          wipeAllPreferences();
+          tft.fillScreen(TFT_NAVY);
+          tft.setFreeFont(&JetBrainsMono_Medium13pt7b);
+          tft.setTextColor(TFT_WHITE);
+          tft.drawCentreString("REBOOTING", 160, 110, 4);
+          ESP.restart();
+        }
+        else
+        { // lower half (after inversion)
+          Serial.println("DOWN");
+          break;
+        }
+
+        while (tft.getTouch(&x, &y))
+        {
+          yield();
+        } // wait for release
+      }
+      yield();
+    }
   }
+
   displaySplashScreen();
- 
+
   // Connect to Wi-Fi
   if (!tryConnectSavedWiFi())
   {
@@ -344,6 +394,30 @@ void displaySplashScreen()
 
   // https://notisrac.github.io/FileToCArray/
   int16_t rc = png.openFLASH((uint8_t *)fancySplash, sizeof(fancySplash), pngDraw);
+
+  if (rc == PNG_SUCCESS)
+  {
+
+    Serial.println("Successfully opened png file");
+    Serial.printf("image specs: (%d x %d), %d bpp, pixel type: %d\n", png.getWidth(), png.getHeight(), png.getBpp(), png.getPixelType());
+    tft.startWrite();
+    uint32_t dt = millis();
+    rc = png.decode(NULL, 0);
+    Serial.print("Displayed in ");
+    Serial.print(millis() - dt);
+    Serial.println(" ms");
+    tft.endWrite();
+  }
+
+  digitalWrite(TFT_BLP, HIGH);
+}
+
+void displayFactoryResetScreen()
+{
+  digitalWrite(TFT_BLP, LOW);
+
+  // https://notisrac.github.io/FileToCArray/
+  int16_t rc = png.openFLASH((uint8_t *)factoryReset, sizeof(factoryReset), pngDraw);
 
   if (rc == PNG_SUCCESS)
   {
@@ -1089,95 +1163,39 @@ bool tryConnectSavedWiFi()
 {
   Serial.println("🔍 Attempting to load saved WiFi credentials...");
 
-  Preferences prefs;
-  prefs.begin("wifi", /*readOnly=*/false);
+  prefs.begin("wifi", true);
   String ssid = prefs.getString("ssid", "");
   String pass = prefs.getString("pass", "");
-  uint8_t failCount = prefs.getUChar("wifi_fail", 0);
   prefs.end();
 
   if (ssid.isEmpty() || pass.isEmpty())
   {
-    Serial.println("⚠️ No saved credentials found. Starting configuration portal.");
-    startConfigurationPortal();
+    Serial.println("⚠️ No saved credentials found.");
     return false;
   }
 
   Serial.printf("📡 Found SSID: %s\n", ssid.c_str());
-  // Serial.printf("🔐 Found Password: %s\n", pass.c_str()); // avoid printing secrets
+  Serial.printf("🔐 Found Password: %s\n", pass.c_str());
 
-  WiFi.mode(WIFI_STA);
   Serial.printf("🔌 Connecting to WiFi: %s...\n", ssid.c_str());
   WiFi.begin(ssid.c_str(), pass.c_str());
 
-  const unsigned long deadline = millis() + CONNECT_TIMEOUT_MS;
-  while (WiFi.status() != WL_CONNECTED && millis() < deadline)
+  for (int i = 0; i < 20; i++)
   {
-    delay(200);
+    if (WiFi.status() == WL_CONNECTED)
+    {
+      Serial.println("✅ Connected to WiFi!");
+      Serial.print("📶 IP Address: ");
+      Serial.println(WiFi.localIP());
+      return true;
+    }
     Serial.print(".");
+    delay(500);
   }
-  Serial.println();
-
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    Serial.println("✅ Connected to WiFi!");
-    Serial.print("📶 IP Address: ");
-    Serial.println(WiFi.localIP());
-
-    // --- Override DNS servers (switch to static config using current IP/gw/subnet) ---
-    // Primary: 1.1.1.1 (Cloudflare), Secondary: 1.0.0.1
-    IPAddress dns1(1, 1, 1, 1);
-    IPAddress dns2(1, 0, 0, 1);
-
-    bool dnsOk = WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(), dns1, dns2);
-    if (dnsOk)
-    {
-      Serial.printf("🌐 DNS set to %s (primary), %s (secondary)\n",
-                    dns1.toString().c_str(), dns2.toString().c_str());
-    }
-    else
-    {
-      Serial.println("⚠️ Failed to set custom DNS servers.");
-    }
-
-    // Reset the persistent fail counter on success
-    prefs.begin("wifi", /*readOnly=*/false);
-    prefs.putUChar("wifi_fail", 0);
-    prefs.end();
-    return true;
-  }
-
-  // Not connected -> handle reboot logic
-  Serial.println("❌ Failed to connect to saved WiFi.");
-
-  if (failCount < MAX_WIFI_REBOOTS)
-  {
-    failCount++;
-    Serial.printf("🔁 Reboot attempt %u/%u before starting portal...\n", failCount, MAX_WIFI_REBOOTS);
-
-    // Persist the incremented counter
-    prefs.begin("wifi", /*readOnly=*/false);
-    prefs.putUChar("wifi_fail", failCount);
-    prefs.end();
-
-    delay(300);    // let serial flush
-    ESP.restart(); // will not return
-    while (true)
-    {
-      delay(1000);
-    } // safety
-  }
-
-  // Reached the limit: reset counter and open portal
-  Serial.println("🛠  Max reboot attempts reached. Starting configuration portal.");
-  prefs.begin("wifi", /*readOnly=*/false);
-  prefs.putUChar("wifi_fail", 0);
-  prefs.end();
-
+  Serial.println("\n❌ Failed to connect to saved WiFi.");
   startConfigurationPortal();
-  return false;
 }
-// Draws the time at (x, y) with specified colors and blinking colon logic
+
 void drawLOCALTime(const String &timeStr, int x, int y, uint16_t digitColor, uint16_t backgroundColor, bool blinkColon)
 {
   tft.setFreeFont(&HB97DIGITS12pt7b);
@@ -1370,4 +1388,26 @@ void updateWiFiSignalDisplay()
   // Save current values for next comparison
   lastRSSI = newRSSI;
   lastSignal = newSignal;
+}
+
+void wipeAllPreferences()
+{
+  Preferences prefs;
+
+  // Wipe Wi-Fi credentials
+  prefs.begin("wifi", false);
+  prefs.clear();
+  prefs.end();
+
+  // Wipe time settings
+  prefs.begin("time", false);
+  prefs.clear();
+  prefs.end();
+
+  // Wipe solar/about settings
+  prefs.begin("solar", false);
+  prefs.clear();
+  prefs.end();
+
+  Serial.println("✅ All Preferences cleared!");
 }
